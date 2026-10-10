@@ -58,6 +58,9 @@ COMMIT_MESSAGE = """feat: 支持通过环境变量配置初始管理员与访问
 - 账号未被破坏，信号处理正常
 
 新增 scripts/test-env-init.sh 用于回归测试该能力。
+
+deploy.sh 同步更新：自动从 .env.example 生成 .env 并提示修改，
+启动后打印 entrypoint 初始化日志与最终访问地址。
 """
 
 
