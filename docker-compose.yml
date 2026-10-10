@@ -1,27 +1,66 @@
+# ============================================================
+# LMM-API 一键部署配置
+#
+# 直接使用线上已编译好的 AMD64 镜像，无需本地构建。
+#
+#   docker compose up -d
+#
+# 默认拉取 ghcr.io/dszz453/lmm-api:2.5.1cl
+# 若 GHCR 拉取慢，可换成下面的镜像加速地址（见注释）。
+# ============================================================
 services:
   lmm-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MIXAPI_VERSION: v2.5.1cl
-    image: lmm-api:2.5.1cl
+    # 默认从 GHCR 拉取已编译镜像
+    image: ghcr.io/dszz453/lmm-api:2.5.1cl
+
+    # 如需自行构建，把上面 image 注释掉，启用下面两行：
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.offline
+
     container_name: lmm-api
     restart: unless-stopped
+
     ports:
       # 宿主机端口:容器端口。冲突时改冒号左边
       - "3000:3000"
+
     environment:
       TZ: Asia/Shanghai
-      # 首次启动可用环境变量初始化管理员（部分版本支持，也可启动后在网页注册）
+
+      # ---- 关键：修正前端访问地址 ----
+      # 不设置时服务默认用 http://localhost:3000，
+      # 会导致用局域网 IP 访问时登录跳转失败、Passkey 校验不通过。
+      # 改成你实际的访问地址（局域网 IP 或域名）。
+      FRONTEND_BASE_URL: http://192.168.31.180:3000
+
+      # 会话密钥：生产环境务必改成随机字符串，否则重启后登录态会失效
       # SESSION_SECRET: 请改成随机字符串
-      # SQL_DSN: 使用外部数据库时填写，默认用内置 SQLite
+
+      # 使用外部数据库时填写；默认用内置 SQLite
+      # SQL_DSN: "root:password@tcp(mysql:3306)/lmm-api"
+
+      # Redis 缓存（可选，多副本部署时建议启用）
+      # REDIS_CONN_STRING: "redis://redis:6379"
+
+      # 流式响应超时（秒），出现空补全时可调大
+      # STREAMING_TIMEOUT: 120
+
     volumes:
-      # 持久化数据库与日志，务必保留
+      # 持久化数据库与日志。升级/重建容器时务必保留
       - ./data:/data
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/status"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+# 若需 Redis，取消下面注释
+#   redis:
+#     image: redis:7-alpine
+#     container_name: lmm-api-redis
+#     restart: unless-stopped
+#     volumes:
+#       - ./redis-data:/data

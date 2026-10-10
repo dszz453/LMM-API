@@ -1,0 +1,102 @@
+name: Build and Push AMD64 Image
+
+# 触发条件：
+#   - 推送到 main 分支
+#   - 打 tag（如 v2.5.1cl）
+#   - 手动触发（可在 Actions 页面填自定义上游版本）
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      mixapi_version:
+        description: '上游 MIXAPI 版本（如 v2.5.1cl）'
+        required: false
+        default: 'v2.5.1cl'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  MIXAPI_VERSION: ${{ github.event.inputs.mixapi_version || 'v2.5.1cl' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 QEMU（跨架构构建支持）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GitHub 容器仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.MIXAPI_VERSION }}
+            type=raw,value=latest
+            type=ref,event=tag
+            type=sha,prefix=sha-,format=short
+
+      # 关键步骤：先下载二进制，再交给 Docker 构建。
+      # 这样镜像构建过程不需要联网访问 GitHub Release，
+      # 构建更快也更稳定。
+      - name: 下载 MIXAPI AMD64 二进制
+        run: |
+          set -eux
+          mkdir -p build-context
+          URL="https://github.com/aiprodcoder/MIXAPI/releases/download/${MIXAPI_VERSION}/mixapi-${MIXAPI_VERSION}-linux-amd64"
+          echo "下载: $URL"
+          curl -L --fail --retry 3 --retry-delay 5 -o build-context/lmm-api "$URL"
+          ls -lh build-context/lmm-api
+          # 校验是 ELF 且架构为 AMD64（e_machine=62）
+          head -c 4 build-context/lmm-api | grep -q ELF
+          MACHINE=$(od -An -tu2 -j18 -N2 build-context/lmm-api | tr -d ' ')
+          echo "e_machine=$MACHINE"
+          [ "$MACHINE" = "62" ] || { echo "错误：非 AMD64 二进制"; exit 1; }
+          sha256sum build-context/lmm-api
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.offline
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 输出镜像信息
+        run: |
+          echo "### 构建完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "上游版本：\`${MIXAPI_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "镜像标签：" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "拉取命令：" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${MIXAPI_VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
