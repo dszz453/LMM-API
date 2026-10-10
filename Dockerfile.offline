@@ -26,13 +26,17 @@ LABEL org.opencontainers.image.description="大模型 API 网关，统一 OpenAI
 LABEL org.opencontainers.image.source="https://github.com/aiprodcoder/MIXAPI"
 LABEL org.opencontainers.image.version="v2.5.1cl"
 
-RUN apk add --no-cache ca-certificates tzdata && rm -rf /var/cache/apk/*
+RUN apk add --no-cache ca-certificates tzdata sqlite && rm -rf /var/cache/apk/*
 
 ENV TZ=Asia/Shanghai
 
 COPY build-context/lmm-api /app/lmm-api
 RUN chmod +x /app/lmm-api \
     && head -c 4 /app/lmm-api | grep -q "ELF" || { echo "错误：build-context/lmm-api 不是有效的 ELF 文件"; exit 1; }
+
+# 入口脚本：环境变量驱动的自动初始化（建管理员 + 修地址）
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 3000
 VOLUME ["/data"]
@@ -41,4 +45,4 @@ WORKDIR /data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD wget -qO- http://127.0.0.1:3000/api/status >/dev/null 2>&1 || exit 1
 
-CMD ["/app/lmm-api"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

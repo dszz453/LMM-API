@@ -12,10 +12,65 @@
 ## 一键部署
 
 ```bash
+cp .env.example .env
+vi .env                 # 填上你的管理员密码和访问地址
 docker compose up -d
 ```
 
-然后**必须完成首次初始化**（否则打开网页只有登录页、没有账号）：
+**就这样，不需要其他操作。** 容器启动时会自动读取 `.env` 里的配置，
+完成「创建管理员 → 修正访问地址」，直接打开网页就能登录。
+
+`.env` 内容示例：
+
+```env
+INIT_ROOT_USER=root
+INIT_ROOT_PASSWORD=你的密码（至少8位）
+SERVER_ADDRESS=http://192.168.31.180:3000
+```
+
+> ⚠️ **`SERVER_ADDRESS` 必须填你实际访问用的地址**（局域网 IP 或域名），
+> 不要写 `localhost`。原因见下面「两个必踩的坑」。
+
+查看自动初始化过程：
+
+```bash
+docker compose logs -f lmm-api | grep entrypoint
+```
+
+---
+
+## 环境变量
+
+本镜像在官方 MIXAPI 之外包了一层入口脚本（`docker-entrypoint.sh`），
+支持以下**增强变量**。注意：上游源码里**没有**这些变量，
+是本镜像自己实现的（通过调用 `/api/setup` 与直接写 SQLite）。
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `INIT_ROOT_USER` | `root` | 初始管理员用户名，最多 12 字符 |
+| `INIT_ROOT_PASSWORD` | 空 | 初始管理员密码，至少 8 位。**不填则不自动建号** |
+| `SERVER_ADDRESS` | 空 | 对外访问地址。填了会自动写入数据库并生效 |
+| `INIT_AUTO_SETUP` | `auto` | `auto` 仅未初始化时建号 / `force` 总是尝试 / `off` 关闭 |
+| `TZ` | `Asia/Shanghai` | 时区 |
+
+行为说明：
+
+- **幂等**。管理员已存在时不会重复创建，也不会覆盖密码。
+  想改密码请登录后台操作，不要靠改环境变量。
+- **只生效一次**。首次初始化后，`INIT_ROOT_PASSWORD` 就不再起作用
+  （因为账号已存在，脚本会跳过）。
+- **地址变更会触发重启**。若 `SERVER_ADDRESS` 与数据库不符，
+  脚本会写库并重启主程序（**不是重启容器**，数据不受影响）。
+- **不依赖 python**。镜像内装的是 `sqlite`，改地址走宿主机 CLI。
+
+原版支持的变量（`SESSION_SECRET`、`SQL_DSN`、`REDIS_CONN_STRING`、
+`STREAMING_TIMEOUT` 等）依然可用，见 `docker-compose.yml` 注释。
+
+---
+
+## 不用环境变量也可以（手动方式）
+
+如果你的平台不方便设置环境变量，可以用脚本手工完成：
 
 ```bash
 sh scripts/init_deploy.sh \
@@ -24,14 +79,11 @@ sh scripts/init_deploy.sh \
     --pass '你的密码（至少8位）'
 ```
 
-看到 `[OK] 地址修正成功` 即可用浏览器打开 <http://192.168.31.180:3000> 登录。
+看到 `[OK] 地址修正成功` 即可打开 <http://192.168.31.180:3000> 登录。
 
 > 💡 这个脚本**不依赖 python**，iStoreOS / OpenWrt 等精简系统可直接跑。
 > 它会自动完成三件事：创建管理员 → 验证登录 → 修正访问地址。
 > 重复执行是安全的（已初始化会自动跳过）。
-
-> ⚠️ **`--addr` 必须填你实际访问用的地址**（局域网 IP 或域名），
-> 不要写 `localhost`。原因见下面「两个必踩的坑」。
 
 只检查当前状态、不改动任何东西：
 
@@ -207,6 +259,7 @@ docker build -f Dockerfile.build --platform linux/amd64 -t lmm-api:build ./src
 | 局域网登录 | `POST /api/user/login` 返回 session ✓ |
 | 地址修正 | `server_address` 由 `localhost:3000` 改为局域网 IP ✓ |
 | 一键脚本 | `init_deploy.sh` 从零到可用，且重复执行幂等 ✓ |
+| 环境变量初始化 | `docker compose up -d` 后自动建号 + 修地址，零手工操作 ✓ |
 
 二进制 SHA256（`v2.5.1cl` amd64）：
 `cbc88a50d82349ef98405e0aec3ce9d5a33afc6cd42dac7e9c4b49b4e05e2775`
@@ -293,19 +346,35 @@ LMM-API/
 ├── Dockerfile                  # 联网构建（下载官方二进制）
 ├── Dockerfile.offline          # 离线构建（本地 COPY 二进制）
 ├── Dockerfile.build            # 从源码完整编译
-├── docker-compose.yml
+├── docker-entrypoint.sh        # ★ 容器入口：环境变量驱动的自动初始化
+├── docker-compose.yml          # 部署配置（读同目录 .env）
+├── .env.example                # 环境变量模板（复制为 .env 后修改）
 ├── deploy.sh                   # 一键部署脚本
 ├── scripts/
-│   ├── init_deploy.sh          # ★ 首次初始化（纯 shell，推荐）
+│   ├── init_deploy.sh          # 手工初始化（纯 shell，推荐）
 │   ├── init_deploy.py          # 同上，python 版本（功能更全）
 │   ├── fix_server_address.sh   # 单独修正 server_address / Passkey
 │   ├── set_address.py          # 上面脚本调用的 python 实现
 │   ├── inspect_db.py           # 打印数据库全表结构（排障用）
 │   ├── ssh_exec.py             # 远程执行命令（paramiko）
+│   ├── test-env-init.sh        # 环境变量自动初始化的测试脚本
 │   ├── push_via_api.py         # 通过 API 推送仓库（绕开 git 协议）
 │   └── fetch-binary.sh         # 下载二进制并校验架构
 └── README.md
 ```
+
+### 环境变量初始化是怎么实现的
+
+上游源码**没有** `INIT_ROOT_USER` 这类变量，是本镜像自己加的。
+原理在 `docker-entrypoint.sh`：
+
+1. 后台拉起原程序，轮询 `/api/status` 等待就绪
+2. 调 `/api/setup` 查初始化状态，未初始化且设了密码就建管理员
+3. 比对 `/api/status` 的 `server_address` 与 `SERVER_ADDRESS`，
+   不一致则用镜像内的 `sqlite` 直接写 `options` 表，再重启主程序
+4. 转入前台守护，主程序退出则容器退出（保证生命周期语义正确）
+
+其中第 2、3 步都做了幂等判断，重复启动不会重复执行。
 
 ---
 

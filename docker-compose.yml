@@ -3,7 +3,8 @@
 #
 #   docker compose up -d
 #
-# 直接使用 GitHub 上已编译好的 AMD64 镜像，无需本地构建。
+# 支持通过环境变量配置初始管理员与访问地址，
+# 容器启动时自动完成初始化，无需手工执行脚本。
 # ============================================================
 services:
   lmm-api:
@@ -24,10 +25,29 @@ services:
       - "3000:3000"
 
     environment:
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
 
-      # 会话密钥：生产环境建议改成随机字符串。
-      # 不设置时程序会自动生成并持久化到 /data，重启不会掉登录态。
+      # ---------------- 初始管理员（本镜像增强） ----------------
+      # 值来自同目录 .env 文件（可 cp .env.example .env 后修改）。
+      # 容器首次启动时自动创建管理员，无需手工调接口。
+      # 系统已初始化后这两个变量不再生效（不会覆盖已有账号）。
+      INIT_ROOT_USER: ${INIT_ROOT_USER:-root}
+      INIT_ROOT_PASSWORD: ${INIT_ROOT_PASSWORD:-}
+
+      # 自动初始化开关：
+      #   auto  = 仅在未初始化时创建管理员（默认，推荐）
+      #   force = 无论是否初始化都尝试创建
+      #   off   = 关闭，完全等同于原版行为
+      INIT_AUTO_SETUP: ${INIT_AUTO_SETUP:-auto}
+
+      # ---------------- 对外访问地址 ----------------
+      # 必须填你实际访问用的地址（局域网 IP 或域名），不要写 localhost。
+      # 不填则保持 MIXAPI 默认值 http://localhost:3000。
+      # 填了会在启动时自动写入数据库并生效（含 Passkey 配置）。
+      SERVER_ADDRESS: ${SERVER_ADDRESS:-}
+
+      # ---------------- 以下为原版支持的变量 ----------------
+      # 会话密钥：不设置时程序自动生成并持久化到 /data
       # SESSION_SECRET: 请改成 64 位随机十六进制字符串
 
       # 使用外部数据库时填写；默认用内置 SQLite
@@ -48,7 +68,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 30s
 
 # 若需 Redis，取消下面注释
 #   redis:

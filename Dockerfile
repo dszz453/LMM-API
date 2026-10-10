@@ -24,6 +24,7 @@ RUN apk add --no-cache \
         ca-certificates \
         tzdata \
         wget \
+        sqlite \
     && rm -rf /var/cache/apk/*
 
 # 时区设为东八区，日志时间与国内一致
@@ -51,7 +52,11 @@ EXPOSE 3000
 VOLUME ["/data"]
 WORKDIR /data
 
+# 入口脚本：环境变量驱动的自动初始化（建管理员 + 修地址）
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD wget -qO- http://127.0.0.1:3000/api/status >/dev/null 2>&1 || exit 1
 
-CMD ["/app/lmm-api"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

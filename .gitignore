@@ -3,3 +3,4 @@ src/
 build-context/
 *.log
 .env
+.env.local

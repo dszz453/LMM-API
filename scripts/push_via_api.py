@@ -22,37 +22,42 @@ SKIP_DIRS = {"__pycache__", ".git", ".venv", "venv", ".pytest_cache",
 SKIP_FILES = {".env", "mix-api.db", "lmm-api"}
 API = "https://api.github.com"
 
-COMMIT_MESSAGE = """feat: 修复部署后登录不进去的问题，补充部署 yaml 与初始化脚本
+COMMIT_MESSAGE = """feat: 支持通过环境变量配置初始管理员与访问地址
 
-排查出两个官方 README 未说明的坑：
+上游 MIXAPI 源码里没有任何初始化账号相关的环境变量，
+本次在镜像内包一层入口脚本实现该能力。
 
-坑一：首次部署后没有账号，登录不进去
-  容器启动时 users 表为 0 行，日志明确提示
-  "system is not initialized and no root user exists"。
-  MIXAPI 不会自动创建默认管理员，必须先调用 POST /api/setup
-  创建第一个管理员账号，系统才算初始化完成。
-  容器重启后会依据 root 用户是否存在重新判断初始化状态，
-  因此没建成账号前重启多少次都无效。
+新增 docker-entrypoint.sh：
+  容器启动后自动完成初始化，无需手工调接口或跑脚本。
+  1. 后台拉起原程序，轮询 /api/status 等待就绪
+  2. 调 /api/setup 查状态，未初始化则用环境变量建管理员
+  3. 比对 server_address 与 SERVER_ADDRESS，不一致则写
+     SQLite 的 options 表并重启主程序（不重启容器）
+  4. 转入前台守护，主程序退出则容器退出
 
-坑二：FRONTEND_BASE_URL 环境变量在单机部署下被忽略
-  启动日志有 "FRONTEND_BASE_URL is ignored on master node"。
-  该地址真正来源是编译期默认值 setting.ServerAddress
-  （硬编码 http://localhost:3000），仅在首次初始化时写入
-  options 表，之后以数据库为准。
-  影响：passkey_rp_id 指向 localhost:3000，用局域网 IP 访问时
-  Passkey 校验域不匹配导致登录失败（密码登录不受影响）。
+支持的环境变量：
+  INIT_ROOT_USER       初始管理员用户名（默认 root）
+  INIT_ROOT_PASSWORD   初始管理员密码（不填则不自动建号）
+  SERVER_ADDRESS       对外访问地址（填了自动写库生效）
+  INIT_AUTO_SETUP      auto / force / off，默认 auto
 
-新增：
-- scripts/init_deploy.py         首次初始化：建管理员 + 校验登录 + 地址检查
-- scripts/fix_server_address.sh  修正 ServerAddress/PasskeyOrigins/PasskeyRPID
-- scripts/set_address.py         shell 脚本调用的 python 实现
-- scripts/inspect_db.py          打印数据库全表结构与内容（排障用）
-- scripts/ssh_exec.py            基于 paramiko 的远程命令执行辅助
+特性：
+- 幂等：管理员已存在时不重复创建，不覆盖密码
+- 不用 python：镜像内装 sqlite CLI，改地址走本地命令
+- 两个 Dockerfile 均改用 ENTRYPOINT 并安装 sqlite
+- healthcheck start_period 由 20s 调至 30s，给初始化留时间
 
-变更：
-- docker-compose.yml  移除无效的 FRONTEND_BASE_URL，补注释说明
-- README.md           重写，补充「两个必踩的坑」章节
-                      与完整的初始化/排障步骤
+配置方式：
+- 新增 .env.example 模板，compose 用 ${VAR:-default} 读取
+- .env 已加入 .gitignore/.dockerignore，密码不进仓库
+
+实测验证（192.168.31.180）：
+- 全新环境 docker compose up -d 后自动建号 + 修地址，零手工
+- 登录用环境变量里的凭据成功，role=100
+- 重启容器：正确跳过创建，提示「系统已初始化」
+- 账号未被破坏，信号处理正常
+
+新增 scripts/test-env-init.sh 用于回归测试该能力。
 """
 
 
