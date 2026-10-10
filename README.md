@@ -18,13 +18,17 @@ docker compose up -d
 然后**必须完成首次初始化**（否则打开网页只有登录页、没有账号）：
 
 ```bash
-python3 scripts/init_deploy.py \
+sh scripts/init_deploy.sh \
     --addr http://192.168.31.180:3000 \
     --user root \
     --pass '你的密码（至少8位）'
 ```
 
-看到 `[验证] 登录成功` 即可用浏览器打开 <http://192.168.31.180:3000> 登录。
+看到 `[OK] 地址修正成功` 即可用浏览器打开 <http://192.168.31.180:3000> 登录。
+
+> 💡 这个脚本**不依赖 python**，iStoreOS / OpenWrt 等精简系统可直接跑。
+> 它会自动完成三件事：创建管理员 → 验证登录 → 修正访问地址。
+> 重复执行是安全的（已初始化会自动跳过）。
 
 > ⚠️ **`--addr` 必须填你实际访问用的地址**（局域网 IP 或域名），
 > 不要写 `localhost`。原因见下面「两个必踩的坑」。
@@ -32,7 +36,7 @@ python3 scripts/init_deploy.py \
 只检查当前状态、不改动任何东西：
 
 ```bash
-python3 scripts/init_deploy.py --addr http://192.168.31.180:3000 --check
+sh scripts/init_deploy.sh --addr http://192.168.31.180:3000 --check
 ```
 
 查看日志：
@@ -68,7 +72,7 @@ setups 表 0 行 →  系统未初始化
 它**不会**自动创建默认管理员。必须先调用 `/api/setup` 创建第一个
 管理员账号，这一步做了系统才算初始化完成（`setup: true`）。
 
-`scripts/init_deploy.py` 封装了这个流程。
+`scripts/init_deploy.sh` 封装了这个流程（纯 shell，无需 python）。
 
 > 注意：`setup` 状态存在内存里，容器重启后会根据「是否存在 root 用户」
 > 重新判断。所以只要没创建成功账号，重启多少次都还是未初始化状态。
@@ -105,6 +109,8 @@ var ServerAddress = "http://localhost:3000"
 ```bash
 sh scripts/fix_server_address.sh http://192.168.31.180:3000
 ```
+
+（`init_deploy.sh` 已内置这一步，通常不需要单独执行。）
 
 它会写入三项并重启容器：
 
@@ -200,6 +206,7 @@ docker build -f Dockerfile.build --platform linux/amd64 -t lmm-api:build ./src
 | 首次初始化 | `/api/setup` 创建管理员成功 ✓ |
 | 局域网登录 | `POST /api/user/login` 返回 session ✓ |
 | 地址修正 | `server_address` 由 `localhost:3000` 改为局域网 IP ✓ |
+| 一键脚本 | `init_deploy.sh` 从零到可用，且重复执行幂等 ✓ |
 
 二进制 SHA256（`v2.5.1cl` amd64）：
 `cbc88a50d82349ef98405e0aec3ce9d5a33afc6cd42dac7e9c4b49b4e05e2775`
@@ -249,8 +256,8 @@ environment:
 ## 常见问题
 
 **Q：打开网页登录不进去？**
-先跑 `python3 scripts/init_deploy.py --addr <你的地址> --check`。
-如果显示 `已初始化 : False`，说明还没创建管理员，加上 `--user` / `--pass`
+先跑 `sh scripts/init_deploy.sh --addr <你的地址> --check`。
+如果显示 `已初始化 : 0`，说明还没创建管理员，加上 `--user` / `--pass`
 再跑一次即可。详见「两个必踩的坑 - 坑一」。
 
 **Q：用户名密码能登录，但 Passkey 登录失败？**
@@ -289,11 +296,13 @@ LMM-API/
 ├── docker-compose.yml
 ├── deploy.sh                   # 一键部署脚本
 ├── scripts/
-│   ├── init_deploy.py          # 首次初始化：建管理员 + 校验登录
-│   ├── fix_server_address.sh   # 修正 server_address / Passkey
+│   ├── init_deploy.sh          # ★ 首次初始化（纯 shell，推荐）
+│   ├── init_deploy.py          # 同上，python 版本（功能更全）
+│   ├── fix_server_address.sh   # 单独修正 server_address / Passkey
 │   ├── set_address.py          # 上面脚本调用的 python 实现
 │   ├── inspect_db.py           # 打印数据库全表结构（排障用）
 │   ├── ssh_exec.py             # 远程执行命令（paramiko）
+│   ├── push_via_api.py         # 通过 API 推送仓库（绕开 git 协议）
 │   └── fetch-binary.sh         # 下载二进制并校验架构
 └── README.md
 ```

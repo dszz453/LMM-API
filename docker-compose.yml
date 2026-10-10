@@ -8,7 +8,8 @@
 services:
   lmm-api:
     # 从 GHCR 拉取已编译镜像
-    image: ghcr.io/dszz453/lmm-api:2.5.1cl
+    # 可用 tag：v2.5.1cl / latest
+    image: ghcr.io/dszz453/lmm-api:v2.5.1cl
 
     # 如需自行构建，把上面 image 注释掉，启用下面两行：
     # build:
