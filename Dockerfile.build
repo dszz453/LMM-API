@@ -1,0 +1,68 @@
+# ============================================================
+# LMM-API — 从上游源码完整编译（多阶段构建，AMD64）
+#
+# 与 Dockerfile 的区别：那个是「下载官方预编译二进制」，
+# 这个是「真的从源码 go build」，会现场编译 React 前端并嵌入后端。
+#
+# 上游：https://github.com/aiprodcoder/MIXAPI
+#
+# 构建（耗时长，前端编译较慢，建议给足内存）：
+#   docker build -f Dockerfile.build --platform linux/amd64 -t lmm-api:build .
+# ============================================================
+
+# ---------- 阶段 1：构建前端 ----------
+FROM oven/bun:1-alpine AS frontend
+
+WORKDIR /src/web
+
+# 先拷依赖清单，利用层缓存
+COPY web/package.json web/bun.lockb* ./
+RUN bun install --frozen-lockfile || bun install
+
+# 拷前端源码并构建
+COPY web/ ./
+COPY VERSION /src/VERSION
+RUN DISABLE_ESLINT_PLUGIN='true' \
+    VITE_REACT_APP_VERSION="$(cat /src/VERSION)" \
+    bun run build \
+    && test -d dist
+
+# ---------- 阶段 2：编译 Go 后端 ----------
+FROM golang:1.24-alpine AS backend
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src
+
+# 先拉依赖，利用层缓存
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 拷源码
+COPY . .
+
+# 把阶段 1 构建好的前端产物放进去，让 go:embed 能嵌入
+COPY --from=frontend /src/web/dist ./web/dist
+
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+
+RUN go build -ldflags "-s -w -X 'main.Version=$(cat VERSION)'" -o /out/lmm-api . \
+    && /out/lmm-api --version 2>/dev/null || true
+
+# ---------- 阶段 3：运行镜像 ----------
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata && rm -rf /var/cache/apk/*
+ENV TZ=Asia/Shanghai
+
+COPY --from=backend /out/lmm-api /app/lmm-api
+RUN chmod +x /app/lmm-api
+
+EXPOSE 3000
+VOLUME ["/data"]
+WORKDIR /data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:3000/api/status >/dev/null 2>&1 || exit 1
+
+CMD ["/app/lmm-api"]

@@ -1,0 +1,27 @@
+services:
+  lmm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MIXAPI_VERSION: v2.5.1cl
+    image: lmm-api:2.5.1cl
+    container_name: lmm-api
+    restart: unless-stopped
+    ports:
+      # 宿主机端口:容器端口。冲突时改冒号左边
+      - "3000:3000"
+    environment:
+      TZ: Asia/Shanghai
+      # 首次启动可用环境变量初始化管理员（部分版本支持，也可启动后在网页注册）
+      # SESSION_SECRET: 请改成随机字符串
+      # SQL_DSN: 使用外部数据库时填写，默认用内置 SQLite
+    volumes:
+      # 持久化数据库与日志，务必保留
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
