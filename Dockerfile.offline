@@ -1,0 +1,44 @@
+# ============================================================
+# LMM-API — 离线构建（AMD64）
+#
+# 适用场景：目标环境访问 GitHub Release 很慢（实测国内直连
+# 只有 20-40 KB/s，70MB 要下十分钟以上），或完全无法联网。
+#
+# 做法：先在能联网的机器上下载好二进制，放进 build-context/，
+# 本文件直接 COPY 进镜像，构建只需几秒。
+#
+# 用法：
+#   1) 下载二进制
+#      mkdir -p build-context
+#      curl -L -o build-context/lmm-api \
+#        https://github.com/aiprodcoder/MIXAPI/releases/download/v2.5.1cl/mixapi-v2.5.1cl-linux-amd64
+#
+#   2) 校验（可选但推荐）
+#      file build-context/lmm-api      # 应显示 ELF 64-bit LSB executable, x86-64
+#
+#   3) 构建
+#      docker build -f Dockerfile.offline -t lmm-api:2.5.1cl .
+# ============================================================
+FROM alpine:3.20
+
+LABEL org.opencontainers.image.title="LMM-API"
+LABEL org.opencontainers.image.description="大模型 API 网关，统一 OpenAI/Claude/Gemini 兼容接口"
+LABEL org.opencontainers.image.source="https://github.com/aiprodcoder/MIXAPI"
+LABEL org.opencontainers.image.version="v2.5.1cl"
+
+RUN apk add --no-cache ca-certificates tzdata && rm -rf /var/cache/apk/*
+
+ENV TZ=Asia/Shanghai
+
+COPY build-context/lmm-api /app/lmm-api
+RUN chmod +x /app/lmm-api \
+    && head -c 4 /app/lmm-api | grep -q "ELF" || { echo "错误：build-context/lmm-api 不是有效的 ELF 文件"; exit 1; }
+
+EXPOSE 3000
+VOLUME ["/data"]
+WORKDIR /data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:3000/api/status >/dev/null 2>&1 || exit 1
+
+CMD ["/app/lmm-api"]
